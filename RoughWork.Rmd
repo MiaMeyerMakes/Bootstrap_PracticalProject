@@ -197,7 +197,6 @@ Now we want to investigate the distributions of the two groups, as well as the i
 ```{r}
 set.seed(12345)
 
-
 nsize <- nrow(smellset)
 bsize <- nsize
 B <- 1000
@@ -213,22 +212,438 @@ for (b in 1:B)
 {
   newSelect <- sample(1:nsize, size = bsize, replace = TRUE)
   newSample <- smellset[newSelect,]
-  new.z <- newSample[1:nF,]
-  new.y <- newSample[(nF+1):nsize,]
-  s.pooled <- sqrt(((nF-1)*var(new.z$Smell) + (nM-1)*var(new.y$Smell))/(nsize-2))
+  new.f <- newSample[1:nF,]
+  new.m <- newSample[(nF+1):nsize,]
+  s.pooled <- sqrt(((nF-1)*var(new.f$Smell) + (nM-1)*var(new.m$Smell))/(nsize-2))
   denom <- s.pooled*sqrt((1/nF) + (1/nM))
-  t.star.st[b] <- (mean(new.z$Smell)- mean(new.y$Smell))/denom
+  t.star.st[b] <- (mean(new.f$Smell)- mean(new.m$Smell))/denom
 }
 
 ASL.student <- sum(t.star.st >= t.obs)/B
-print(t.obs)
-print(ASL.student)
-hist(t.star.st)
 
+resultsAll01 <- data.frame(Result = c("nF", "nM", "FemaleVariance", "MaleVariance", "t.obs", "ASL.student"),
+                         Value = c(nF, nM, var(FemSmell$Smell), var(MaleSmell$Smell), t.obs, ASL.student))
+resultsAll01
+
+hist(t.star.st)
+abline(v = t.obs, col = "maroon", lty = 2)
+text(x=t.obs-0.3, y = 175, labels="t.obs", col = "maroon", cex = 0.8)
+```
+
+Now suppose they don't have equal variances... Use Algo 16.2.
+
+```{r}
+set.seed(12345)
+
+nF <- nrow(FemSmell)
+nM <- nrow(MaleSmell)
+
+nsize <- nrow(smellset)
+bsize <- nsize
+B <- 1000
+
+# Algorithm 16.2
+x.bar <- mean(smellset$Smell)
+denom <- sqrt((var(FemSmell$Smell)/nF) + (var(MaleSmell$Smell)/nM))
+t.obs <- (mean(FemSmell$Smell)-mean(MaleSmell$Smell))/denom
+f.trans <- FemSmell$Smell - mean(FemSmell$Smell) + x.bar
+m.trans <- MaleSmell$Smell - mean(MaleSmell$Smell) + x.bar
+
+t.star.H02 <- numeric(B)
+
+for (b in 1:B)
+{
+  new.f <- f.trans[sample(1:nF, size = bsize, replace = TRUE)]
+  new.m <- m.trans[sample(1:nM, size = bsize, replace = TRUE)]
+  denom <- sqrt((var(new.f)/nF) + (var(new.m)/nM))
+  t.star.H02[b] <- (mean(new.f)-mean(new.m))/denom
+}
+
+ASL.H02 <- sum(t.star.H02 >= t.obs)/B
+ASL.H02
+resultsAll02 <- data.frame(Result = c("nF", "nM", "FemaleVariance", "MaleVariance", "t.obs", "ASL.H02"),
+                         Value = c(nF, nM, var(FemSmell$Smell), var(MaleSmell$Smell), t.obs, ASL.H02))
+resultsAll02
+
+hist(t.star.H02, xlim = c(-3, 3))
+abline(v = t.obs, col = "maroon", lty = 2)
+text(x=t.obs+0.5, y = 175, labels="t.obs", col = "maroon", cex = 0.8)
+```
+
+
+### Test for gender difference among youth
+
+Now investigate the differences when looking at specific age categories. Use Algorithm 16.2 with unequal variances to test for **ages less than 20 years (youth)**. Note how the sample sizes are closer together now.
+
+```{r}
+set.seed(12345)
+
+FemSmellYouth <- na.omit(newset[newset$Gender=="Female" & newset$Age=="<20",])
+MaleSmellYouth <- na.omit(newset[newset$Gender=="Male" & newset$Age=="<20",])
+smellsetYouth <- rbind(FemSmellYouth, MaleSmellYouth)
+
+nF <- nrow(FemSmellYouth)
+nM <- nrow(MaleSmellYouth)
+
+nsize <- nrow(smellsetYouth)
+bsize <- nsize
+B <- 1000
+
+# Algorithm 16.2
+x.bar <- mean(smellsetYouth$Smell)
+denom <- sqrt((var(FemSmellYouth$Smell)/nF) + (var(MaleSmellYouth$Smell)/nM))
+t.obs <- (mean(FemSmellYouth$Smell)-mean(MaleSmellYouth$Smell))/denom
+f.trans <- FemSmellYouth$Smell - mean(FemSmellYouth$Smell) + x.bar
+m.trans <- MaleSmellYouth$Smell - mean(MaleSmellYouth$Smell) + x.bar
+
+t.star.H02 <- numeric(B)
+
+for (b in 1:B)
+{
+  new.f <- f.trans[sample(1:nF, size = bsize, replace = TRUE)]
+  new.m <- m.trans[sample(1:nM, size = bsize, replace = TRUE)]
+  denom <- sqrt((var(new.f)/nF) + (var(new.m)/nM))
+  t.star.H02[b] <- (mean(new.f)-mean(new.m))/denom
+}
+
+ASL.H02 <- sum(t.star.H02 >= t.obs)/B
+resultsYouth <- data.frame(Result = c("nF", "nM", "FemaleVariance", "MaleVariance", "t.obs", "ASL.H02"),
+                         Value = c(nF, nM, var(FemSmellYouth$Smell), var(MaleSmellYouth$Smell), t.obs, ASL.H02))
+resultsYouth
+
+hist(t.star.H02)
+abline(v = t.obs, col = "maroon", lty = 2)
+text(x=t.obs+0.3, y = 175, labels="t.obs", col = "maroon", cex = 0.8)
+```
+
+### Test for gender difference among ages 20-35
+
+Now investigate the differences when looking at specific age categories. Use Algorithm 16.2 with unequal variances to test for **ages between 20 and 35**. From this result we can see that the difference at medium ages are not too different. But note here that the sample size now differ more than at the younger ages.
+
+```{r}
+set.seed(12345)
+
+FemSmellMed <- na.omit(newset[newset$Gender=="Female" & newset$Age=="20-35",])
+MaleSmellMed <- na.omit(newset[newset$Gender=="Male" & newset$Age=="20-35",])
+smellsetMed <- rbind(FemSmellMed, MaleSmellMed)
+
+nF <- nrow(FemSmellMed)
+nM <- nrow(MaleSmellMed)
+
+nsize <- nrow(smellsetMed)
+bsize <- nsize
+B <- 1000
+
+# Algorithm 16.2
+x.bar <- mean(smellsetMed$Smell)
+denom <- sqrt((var(FemSmellMed$Smell)/nF) + (var(MaleSmellMed$Smell)/nM))
+t.obs <- (mean(FemSmellMed$Smell)-mean(MaleSmellMed$Smell))/denom
+f.trans <- FemSmellMed$Smell - mean(FemSmellMed$Smell) + x.bar
+m.trans <- MaleSmellMed$Smell - mean(MaleSmellMed$Smell) + x.bar
+
+t.star.H02 <- numeric(B)
+
+for (b in 1:B)
+{
+  new.f <- f.trans[sample(1:nF, size = bsize, replace = TRUE)]
+  new.m <- m.trans[sample(1:nM, size = bsize, replace = TRUE)]
+  denom <- sqrt((var(new.f)/nF) + (var(new.m)/nM))
+  t.star.H02[b] <- (mean(new.f)-mean(new.m))/denom
+}
+
+ASL.H02 <- sum(t.star.H02 >= t.obs)/B
+
+resultsMed <- data.frame(Result = c("nF", "nM", "FemaleVariance", "MaleVariance", "t.obs", "ASL.H02"),
+                         Value = c(nF, nM, var(FemSmellMed$Smell), var(MaleSmellMed$Smell), t.obs, ASL.H02))
+resultsMed
+
+hist(t.star.H02, ylim = c(0, 330))
+abline(v = t.obs, col = "maroon", lty = 2)
+text(x=t.obs+0.18, y = 315, labels="t.obs", col = "maroon", cex = 0.8)
+```
+
+### Test for gender difference among ages 35-50
+
+Now investigate the differences when looking at specific age categories. Use Algorithm 16.2 with unequal variances to test for **ages between 20 and 35**. From this result we can see that the difference at medium ages are not too different. But note here that the sample size now differ more than at the younger ages.
+
+```{r}
+set.seed(12345)
+
+FemSmellMed2 <- na.omit(newset[newset$Gender=="Female" & newset$Age=="35-50",])
+MaleSmellMed2 <- na.omit(newset[newset$Gender=="Male" & newset$Age=="35-50",])
+smellsetMed2 <- rbind(FemSmellMed2, MaleSmellMed2)
+
+nF <- nrow(FemSmellMed2)
+nM <- nrow(MaleSmellMed2)
+
+nsize <- nrow(smellsetMed2)
+bsize <- nsize
+B <- 1000
+
+# Algorithm 16.2
+x.bar <- mean(smellsetMed2$Smell)
+denom <- sqrt((var(FemSmellMed2$Smell)/nF) + (var(MaleSmellMed2$Smell)/nM))
+t.obs <- (mean(FemSmellMed2$Smell)-mean(MaleSmellMed2$Smell))/denom
+f.trans <- FemSmellMed2$Smell - mean(FemSmellMed2$Smell) + x.bar
+m.trans <- MaleSmellMed2$Smell - mean(MaleSmellMed2$Smell) + x.bar
+
+t.star.H02 <- numeric(B)
+
+for (b in 1:B)
+{
+  new.f <- f.trans[sample(1:nF, size = bsize, replace = TRUE)]
+  new.m <- m.trans[sample(1:nM, size = bsize, replace = TRUE)]
+  denom <- sqrt((var(new.f)/nF) + (var(new.m)/nM))
+  t.star.H02[b] <- (mean(new.f)-mean(new.m))/denom
+}
+
+ASL.H02 <- sum(t.star.H02 >= t.obs)/B
+
+resultsMed <- data.frame(Result = c("nF", "nM", "FemaleVariance", "MaleVariance", "t.obs", "ASL.H02"),
+                         Value = c(nF, nM, var(FemSmellMed2$Smell), var(MaleSmellMed2$Smell), t.obs, ASL.H02))
+resultsMed
+
+hist(t.star.H02, ylim = c(0, 330))
+abline(v = t.obs, col = "maroon", lty = 2)
+text(x=t.obs+0.18, y = 315, labels="t.obs", col = "maroon", cex = 0.8)
 ```
 
 # Culture
 
+Just start by plotting the histograms and densities.
+
+```{r}
+
+# calculate the number of countries in every region
+regions <- unique(newset$Region)
+regioncount <- matrix(0, ncol =2, nrow = (length(regions)))
+row.names(regioncount) <- regions
+colnames(regioncount) <- c("NrCountries", "NrEntries")
+
+for (i in 1:(length(unique(newset$Region))))
+{
+  regiondat <- newset[newset$Region==regions[i],]
+  regioncount[i,1] <- length(unique(regiondat$Country))
+  regioncount[i,2] <- length(regiondat$Country)
+}
+regioncount
 
 
+# calculate the number of countries in every region
+countries <- unique(newset$Country)
+countrycount <- matrix(0, ncol =1, nrow = (length(countries)))
+row.names(countrycount) <- countries
+colnames(countrycount) <- c("NrEntries")
+
+for (i in 1:(length(unique(newset$Country))))
+{
+  countrydat <- newset[newset$Country==countries[i],]
+  countrycount[i,1] <- nrow(countrydat)
+}
+countrycount
+
+# Make histograms for the different regions
+
+sa <- newset[newset$Region=="southAfrica",]
+na <- newset[newset$Region=="northAmerica",]
+uk <- newset[newset$Region=="UKireland",]
+aus <- newset[newset$Region=="AustrNZ",]
+other <- newset[newset$Region=="Other",]
+afr <- newset[newset$Region=="Africa",]
+
+# Do bootstrap for mean total threshold
+
+nsize <- nrow(newset)
+bsize <- nsize
+B <- 500
+
+ogsamp <- newset # specify your sample (cont or discrete)
+
+statvals <- matrix(0, nrow=B, ncol = 7)
+colnames(statvals) <- c("sa", "namerica", "uk", "aus", "other", "africa", "all")
+
+# perform normal bootstrap on them
+for (b in 1:B)
+{
+  newSelect <- sample(1:nsize, size = bsize, replace = TRUE)
+  newSample <- ogsamp[newSelect,]
+  mean1 <- mean(newSample[newSample$Region=="southAfrica","Total"])
+  mean2 <- mean(newSample[newSample$Region=="northAmerica","Total"])
+  mean3 <- mean(newSample[newSample$Region=="UKireland","Total"])
+  mean4 <- mean(newSample[newSample$Region=="AustrNZ","Total"])
+  mean5 <- mean(newSample[newSample$Region=="Other","Total"])
+  mean6 <- mean(newSample[newSample$Region=="Africa","Total"])
+  
+  meanall <- mean(newSample[,"Total"])
+  statvals[b,] <- c(mean1, mean2, mean3, mean4, mean5, mean6 ,meanall)
+}
+
+# Generating data
+set.seed(123) # for reproducibility
+statvals <- data.frame(statvals)
+data <- gather(statvals[,c(1:4,6)], key = "Region", value = "MeanTotal")
+
+ggplot(data, aes(x = MeanTotal, fill = Region, after_stat(density))) +
+  geom_histogram(position = "identity", alpha = 0.5, bins = 35) +
+  geom_density(aes(color = Region), alpha = 0.5) + # Overlay density plot
+  scale_fill_manual(values = c("sa" = "blue", "namerica" = "magenta", "uk" = "turquoise", "aus" = "orange", "africa" = "green")) +
+  scale_color_manual(values = c("sa" = "blue2", "namerica" = "magenta2", "uk" = "turquoise3", "aus" = "orange2", "africa" = "green2")) + # Match colors for density plots
+  labs(title = "Histogram of Regions with Density Overlay",
+       x = "Estimated Mean Total Score",
+       y = "Density",
+       fill = "Region",
+       color = "Region") +
+  theme_minimal()
+
+# Plotting histograms with ggplot on a 2x2 grid
+ggplot(data, aes(x = MeanTotal, fill = Region, after_stat(density))) +
+  geom_histogram(position = "identity", alpha = 0.5, bins = 30) +
+  geom_density(aes(color = Region), alpha = 0.5) + # Overlay density plot
+  facet_wrap(~ Region, nrow = 2, ncol = 3) +
+  scale_fill_manual(values = c("sa" = "blue", "namerica" = "magenta", "uk" = "turquoise", "aus" = "orange", "other" = "yellow2", "africa" = "green")) +
+  scale_color_manual(values = c("sa" = "blue2", "namerica" = "magenta2", "uk" = "turquoise3", "aus" = "orange2", "other" = "yellow3", "africa" = "green2")) + # Match colors for density plots
+  labs(title = "Histogram of Regions with Density Overlay",
+       x = "Estimated Mean Total Score",
+       y = "Density",
+       fill = "Region",
+       color = "Region") +
+  theme_minimal()
+```
+
+### Test whether different senses have very different thresholds (1) overall and (2) in foundational years aka <20
+
+You can see here that North America has lots of variation between the different senses and shows that outof all the regions, the individuals don't develop their sensory sensitivity evenly.
+
+```{r}
+# Test over all ages
+statvals <- matrix(0, nrow=B, ncol = 5)
+colnames(statvals) <- c("sa", "namerica", "uk", "aus", "africa")
+
+# perform normal bootstrap on them
+for (b in 1:B)
+{
+  newSelect <- sample(1:nsize, size = bsize, replace = TRUE)
+  newSample <- ogsamp[newSelect,]
+  var(apply(newset[,3:8],2,mean))
+  var(apply(newSample[newSample$Region=="southAfrica", 3:8], 2, mean))
+  var1 <- var(apply(newSample[newSample$Region=="southAfrica", 3:8], 2, mean))
+  var2 <- var(apply(newSample[newSample$Region=="northAmerica", 3:8], 2, mean))
+  var3 <- var(apply(newSample[newSample$Region=="UKireland", 3:8], 2, mean))
+  var4 <- var(apply(newSample[newSample$Region=="AustrNZ", 3:8], 2, mean))
+  # var5 <- var(apply(newSample[newSample$Region=="Other", 3:8], 2, mean))
+  var6 <- var(apply(newSample[newSample$Region=="Africa", 3:8], 2, mean))
+  
+  meanall <- mean(newSample[,"Total"])
+  statvals[b,] <- c(var1, var2, var3, var4, var6)
+}
+
+statvals <- data.frame(statvals)
+data <- gather(statvals, key = "Region", value = "MeanVar")
+
+ggplot(data, aes(x = MeanVar, fill = Region, after_stat(density))) +
+  geom_histogram(position = "identity", alpha = 0.5, bins = 30) +
+  geom_density(aes(color = Region), alpha = 0.5) + # Overlay density plot
+  scale_fill_manual(values = c("sa" = "blue", "namerica" = "magenta", "uk" = "turquoise", "aus" = "orange", "other" = "yellow2","africa" = "green")) +
+  scale_color_manual(values = c("sa" = "blue2", "namerica" = "magenta2", "uk" = "turquoise3", "aus" = "orange2", "other" = "yellow3", "africa" = "green2")) + # Match colors for density plots
+  labs(title = "Histogram of Regions with Density Overlay",
+       x = "Estimated Variance between scores",
+       y = "Frequency",
+       fill = "Region",
+       color = "Region") +
+  theme_minimal()
+
+```
+
+Now we test for youth.
+
+```{r}
+youth <- agedat[agedat$Age=="<20",]
+
+nsize <- nrow(youth)
+bsize <- nsize
+B <- 500
+
+ogsamp <- youth # specify your sample (cont or discrete)
+
+# Test over all ages
+statvals <- matrix(0, nrow=B, ncol = 3)
+colnames(statvals) <- c("sa", "uk", "aus")
+
+# perform normal bootstrap on them
+for (b in 1:B)
+{
+  newSelect <- sample(1:nsize, size = bsize, replace = TRUE)
+  newSample <- ogsamp[newSelect,]
+  var1 <- var(apply(newSample[newSample$Region=="southAfrica", 3:8], 2, mean))
+  # var2 <- var(apply(newSample[newSample$Region=="northAmerica", 3:8], 2, mean))
+  var3 <- var(apply(newSample[newSample$Region=="UKireland", 3:8], 2, mean))
+  var4 <- var(apply(newSample[newSample$Region=="AustrNZ", 3:8], 2, mean))
+  # var5 <- var(apply(newSample[newSample$Region=="Other", 3:8], 2, mean))
+  # var6 <- var(apply(newSample[newSample$Region=="Africa", 3:8], 2, mean))
+  
+  meanall <- mean(newSample[,"Total"])
+  statvals[b,] <- c(var1, var3, var4)
+}
+
+statvals <- data.frame(statvals)
+data <- gather(statvals, key = "Region", value = "MeanVar")
+
+ggplot(data, aes(x = MeanVar, fill = Region, after_stat(density))) +
+  geom_histogram(position = "identity", alpha = 0.5, bins = 40) +
+  geom_density(aes(color = Region), alpha = 0.5) + # Overlay density plot
+  scale_fill_manual(values = c("sa" = "blue", "namerica" = "magenta", "uk" = "turquoise", "aus" = "orange", "other" = "yellow2","africa" = "green")) +
+  scale_color_manual(values = c("sa" = "blue2", "namerica" = "magenta3", "uk" = "turquoise3", "aus" = "orange2", "other" = "yellow3", "africa" = "green2")) + # Match colors for density plots
+  labs(title = "Histogram of Regions with Density Overlay",
+       x = "Estimated Variance between scores",
+       y = "Frequency",
+       fill = "Region",
+       color = "Region") +
+  theme_minimal()
+
+```
+
+Maybe do this using bootstrap as well?...
+
+```{r}
+
+sa <- newset[newset$Region=="southAfrica",]
+na <- newset[newset$Region=="northAmerica",]
+uk <- newset[newset$Region=="UKireland",]
+aus <- newset[newset$Region=="AustrNZ",]
+other <- newset[newset$Region=="Other",]
+afr <- newset[newset$Region=="Africa",]
+
+senses<- rbind(apply(sa[, 3:8], 2, mean),
+               apply(na[, 3:8], 2, mean),
+               apply(uk[, 3:8], 2, mean),
+               apply(aus[, 3:8], 2, mean),
+               apply(other[, 3:8], 2, mean),
+               apply(afr[, 3:8], 2, mean))
+x <- 1:6
+
+cols <- c("blue", "magenta", "turquoise", "orange", "yellow2", "green")
+
+plot(x = x, y = senses[1,], xaxt = 'n',pch = 16, col = "blue", type = "n",
+     ylim = c(-4, 1.5), ylab = "Mean total subscale score", main = "Comparing subscores over different regions")
+axis(1, at = 1:6, labels = colnames(senses))
+rect(par("usr")[1], -2, par("usr")[2], 2, col = "lightcyan", border = NA,density = 30)
+rect(par("usr")[1], -3, par("usr")[2], -2, col = "antiquewhite", border = NA,density = 30)
+rect(par("usr")[1], -10, par("usr")[2], -3, col = "peachpuff2", border = NA,density = 30)
+for (i in 1:6) {
+  points(x=x, y = senses[i,], pch = 16, col = cols[i])
+  lines(x=x, y = senses[i,], col = cols[i])
+}
+abline(h = 0, col = "grey", lty = 3)
+abline(h = -2, col = "lightgrey", lty = 3)
+abline(h = -3, col = "lightgrey", lty = 3)
+legend("bottomright", legend = c("sa", "namerica", "uk", "aus", "other","africa"), 
+       col = c("blue", "magenta", "turquoise", "orange", "yellow2", "green"), 
+       cex = 0.7,lty = 1, pch = 16, bg = "white",box.col= "white", y.intersp = 0.8)
+
+
+```
+
+
+
+var(apply(newset[,3:8],2,mean))
 # Covid-19

@@ -1,0 +1,234 @@
+---
+title: "Bootstrap Practical Project Rough Work"
+author: "M Meyer (22675760)"
+date: "2024-05-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(MASS)
+library(ggplot2)
+library(gridExtra)
+library(kableExtra)
+library(cluster)
+library(combinat)
+library(maps)
+library(tidyr)
+
+library(bootstrap)
+library(bayesboot)
+library(boot, lib.loc = "/Library/Frameworks/R.framework/Versions/4.2/Resources/library")
+
+newset <- read.csv("newset.csv")
+newset$Age <- factor(newset$Age)
+newset$Gender <- factor(newset$Gender)
+newset$Country <- factor(newset$Country)
+newset$Region <- factor(newset$Region)
+
+longset <- read.csv("longset.csv")
+longset$Covid <- factor(longset$Covid)
+
+```
+
+# Age
+
+Took out the `na` values. Note there are only `na` values for age, and not for any other variable.
+
+
+
+```{r}
+agedat <- na.omit(newset)
+
+# get the different age categories
+unique(agedat$Age)
+
+less20 <- agedat[agedat$Age=="<20",]
+int20_35 <- agedat[agedat$Age=="20-35",]
+int35_50 <- agedat[agedat$Age=="35-50",]
+plus50 <- agedat[agedat$Age=="50+",]
+
+nsize <- nrow(agedat)
+bsize <- nsize
+B <- 500
+
+ogsamp <- agedat # specify your sample (cont or discrete)
+
+statvals <- matrix(0, nrow=B, ncol = 5)
+colnames(statvals) <- c("AgeCat1", "AgeCat2", "AgeCat3", "AgeCat4", "OverallMean")
+
+# perform normal bootstrap on them
+for (b in 1:B)
+{
+  newSelect <- sample(1:nsize, size = bsize, replace = TRUE)
+  newSample <- ogsamp[newSelect,]
+  mean1 <- mean(newSample[newSample$Age=="<20","Total"])
+  mean2 <- mean(newSample[newSample$Age=="20-35","Total"])
+  mean3 <- mean(newSample[newSample$Age=="35-50","Total"])
+  mean4 <- mean(newSample[newSample$Age=="50+","Total"])
+  meanall <- mean(newSample[,"Total"])
+  statvals[b,] <- c(mean1, mean2, mean3, mean4,meanall)
+}
+
+# Generating data
+set.seed(123) # for reproducibility
+statvals <- data.frame(statvals)
+data <- gather(statvals[,1:4], key = "AgeCat", value = "MeanTotal")
+
+ggplot(data, aes(x = MeanTotal, fill = AgeCat, after_stat(density))) +
+  geom_histogram(position = "identity", alpha = 0.5, bins = 35) +
+  geom_density(aes(color = AgeCat), alpha = 0.5) + # Overlay density plot
+  scale_fill_manual(values = c("AgeCat1" = "blue", "AgeCat2" = "magenta", "AgeCat3" = "turquoise", "AgeCat4" = "orange")) +
+  scale_color_manual(values = c("AgeCat1" = "blue2", "AgeCat2" = "magenta2", "AgeCat3" = "turquoise2", "AgeCat4" = "orange2")) + # Match colors for density plots
+  labs(title = "Histogram of Age Categories with Density Overlay",
+       x = "Estimated Mean Total Score",
+       y = "Density",
+       fill = "Category",
+       color = "Category") +
+  theme_minimal()
+
+# Plotting histograms with ggplot on a 2x2 grid
+ggplot(data, aes(x = MeanTotal, fill = AgeCat, after_stat(density))) +
+  geom_histogram(position = "identity", alpha = 0.5, bins = 30) +
+  geom_density(aes(color = AgeCat), alpha = 0.5) + # Overlay density plot
+  facet_wrap(~ AgeCat, nrow = 2, ncol = 2) +
+  scale_fill_manual(values = c("AgeCat1" = "blue", "AgeCat2" = "magenta", "AgeCat3" = "turquoise", "AgeCat4" = "orange")) +
+  scale_color_manual(values = c("AgeCat1" = "blue3", "AgeCat2" = "magenta3", "AgeCat3" = "turquoise3", "AgeCat4" = "orange2")) + # Match colors for density plots
+  labs(title = "Histogram of Age Categories with Density Overlay",
+       x = "Estimated Mean Total Score",
+       y = "Density",
+       fill = "Category",
+       color = "Category") +
+  theme_minimal()
+```
+
+
+# Gender
+
+
+```{r}
+set.seed(12345)
+
+FemSmell <- newset[newset$Gender=="Female",]
+MaleSmell <- newset[newset$Gender=="Male",]
+smellset <- rbind(FemSmell, MaleSmell)
+nF <- nrow(FemSmell)
+nM <- nrow(MaleSmell)
+
+nsize <- nrow(smellset)
+bsize <- nsize
+B <- 1000
+
+ogsamp <- smellset # specify your sample (cont or discrete)
+ogmeanF <- mean(smellset[smellset$Gender=="Female","Smell"])
+ogmeanM <- mean(smellset[smellset$Gender=="Male","Smell"])
+ogmeandiff <- ogmeanF-ogmeanM
+# -0.3436272
+
+statvals <- matrix(0, nrow=B, ncol = 3)
+colnames(statvals) <- c("Female", "Male", "MeanDiff")
+
+# perform normal bootstrap on them
+for (b in 1:B)
+{
+  newSelect <- sample(1:nsize, size = bsize, replace = TRUE)
+  newSample <- ogsamp[newSelect,]
+  meanF <- mean(newSample[newSample$Gender=="Female","Smell"])
+  meanM <- mean(newSample[newSample$Gender=="Male","Smell"])
+  meandiff <- meanF-meanM
+  statvals[b,] <- c(meanF, meanM, meandiff)
+}
+statvals <- data.frame(statvals)
+
+theta <- function(dat){ mean(dat[dat$Gender=="Female","Smell"]) - mean(dat[dat$Gender=="Male","Smell"]) }
+
+thetastar <- statvals$MeanDiff
+alpha = c(0.05, 0.95)
+z0 <- qnorm(sum(statvals[,3]<ogmeandiff)/B)
+u <- rep(0, nsize)
+for (i in 1:nsize) {
+    u[i] <- theta(newset[-i,])
+}
+uu <- mean(u) - u
+acc <- sum(uu * uu * uu)/(6 * (sum(uu * uu))^1.5)
+
+zalpha <- qnorm(alpha)
+
+tt <- pnorm(z0 + (z0 + zalpha)/(1 - acc * (z0 + zalpha)))
+confpoints <- quantile(x = thetastar, probs = tt, type = 1)
+confpoints
+```
+
+Now visualise the data
+
+```{r}
+data <- gather(statvals[,1:2], key = "Gender", value = "MeanSmell")
+
+ggplot(data, aes(x = MeanSmell, fill = Gender, after_stat(density))) +
+  geom_histogram(position = "identity", alpha = 0.5, bins = 35) +
+  geom_density(aes(color = Gender), alpha = 0.5) + # Overlay density plot
+  scale_fill_manual(values = c("Female" = "magenta","Male" = "cornflowerblue")) +
+  scale_color_manual(values = c("Female" = "magenta3", "Male" = "blue")) + # Match colors for density plots
+  labs(title = "Histogram of Smell by Gender with Density Overlay",
+       x = "Estimated Mean Smell",
+       y = "Density",
+       fill = "Category",
+       color = "Category") +
+  theme_minimal()
+
+# Plot histogram with confidence interval lines and annotations
+confidence_interval <- confpoints
+
+ggplot(data.frame(x = thetastar), aes(x = x)) +
+  geom_histogram(binwidth = 0.05, fill = "skyblue", color = "black", alpha = 0.8) +
+  geom_vline(xintercept = confidence_interval, linetype = "dashed", color = "maroon", size = 1) +
+  geom_text(aes(x = confidence_interval[1] + 0.4, y = 100, label = paste("Lower:", round(confidence_interval[1], 2))),
+            color = "maroon", vjust = 0, hjust = 0) +
+  geom_text(aes(x = confidence_interval[2] - 0.4, y = 100, label = paste("Upper:", round(confidence_interval[2], 2))),
+            color = "maroon", vjust = 0, hjust = 1) +
+  labs(title = expression("Histogram of Difference in Means with BC"[a] ~ "Confidence Interval"), x = "Value", y = "Frequency") +
+  theme_minimal() # You can change the theme if needed
+
+```
+
+Now we want to investigate the distributions of the two groups, as well as the impact of the two sample size...
+
+```{r}
+set.seed(12345)
+
+
+nsize <- nrow(smellset)
+bsize <- nsize
+B <- 1000
+
+s.pooled <- sqrt(((nF-1)*var(FemSmell$Smell) + (nM-1)*var(MaleSmell$Smell))/(nsize-2))
+denom <- s.pooled*sqrt((1/nF) + (1/nM))
+t.obs <- (mean(FemSmell$Smell)-mean(MaleSmell$Smell))/denom
+
+t.star.st <- numeric(B)
+
+# perform normal bootstrap on them
+for (b in 1:B)
+{
+  newSelect <- sample(1:nsize, size = bsize, replace = TRUE)
+  newSample <- smellset[newSelect,]
+  new.z <- newSample[1:nF,]
+  new.y <- newSample[(nF+1):nsize,]
+  s.pooled <- sqrt(((nF-1)*var(new.z$Smell) + (nM-1)*var(new.y$Smell))/(nsize-2))
+  denom <- s.pooled*sqrt((1/nF) + (1/nM))
+  t.star.st[b] <- (mean(new.z$Smell)- mean(new.y$Smell))/denom
+}
+
+ASL.student <- sum(t.star.st >= t.obs)/B
+print(t.obs)
+print(ASL.student)
+hist(t.star.st)
+
+```
+
+# Culture
+
+
+
+# Covid-19

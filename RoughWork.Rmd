@@ -16,10 +16,15 @@ library(cluster)
 library(combinat)
 library(maps)
 library(tidyr)
+# install.packages("~/Bootstrap_PracticalProject/robustbase_0.99-2.tgz", repos = NULL, type = .Platform$pkgType)
+# library(robustbase)
+library(datawizard)
+library(viridisLite)
 
 library(bootstrap)
 library(bayesboot)
 library(boot, lib.loc = "/Library/Frameworks/R.framework/Versions/4.2/Resources/library")
+library(simpleboot)
 
 newset <- read.csv("newset.csv")
 newset$Age <- factor(newset$Age)
@@ -30,13 +35,106 @@ newset$Region <- factor(newset$Region)
 longset <- read.csv("longset.csv")
 longset$Covid <- factor(longset$Covid)
 
+boot.two.bca <-
+function(x, y, parameter, stacked = TRUE, variable = NULL, null.hyp = NULL,
+                          alternative = c("two.sided","less","greater"), conf.level = 0.95,
+                          type = NULL, R = 9999)
+{
+# require(simpleboot)
+proportion <- mean
+if (stacked)
+  {
+   variable <- all.names(substitute(x))
+   if (length(variable)>1) variable <- variable[[3]]
+   y <- as.factor(y)
+   l <- levels(y)
+   pop.1 <- l[1]
+   pop.2 <- l[2]
+   u <- x[y==l[1]]
+   v <- x[y==l[2]]
+   x <- u
+   y <- v
+  } 
+ else
+  {
+   pop.1 <- all.names(substitute(x))
+   if (length(pop.1)>1) pop.1 <- pop.1[[3]]
+   pop.2 <- all.names(substitute(y))
+   if (length(pop.2)>1) pop.2 <- pop.2[[3]]
+  }
+test <- !is.null(null.hyp)
+m <- length(x)
+n <- length(y)
+statistic <- parameter
+obs.1 <- statistic(x)
+obs.2 <- statistic(y)
+obs <- obs.1-obs.2
+boot.statistic <- two.boot(x,y,statistic,R=R)
+z <- c(boot.statistic$t)
+bias <- signif(mean(z)-obs,digits=3)
+percent.bias <- signif(100*abs(bias/obs),digits=3)
+cl <- paste(100*conf.level,"%",sep="")
+if (identical(alternative,c("two.sided","less","greater"))) alternative <- "two.sided"
+z1 <- mean(z < obs)
+z0 <- qnorm(z1)
+u <- statistic(x)
+v <- statistic(y)
+d <- vector(length=m+n)
+for (i in 1:m) {d[i] <- statistic(x[-i])-v}
+for (j in 1:n) {d[m+j] <- u-statistic(y[-j])}
+mean.d <- mean(d)
+a0 <- -sum((d-mean.d)^3)/(6*(sum((d-mean.d)^2))^(3/2))
+# FOR THE HYPOTHESIS TEST
+if (test)
+{
+ rtp <- (sum((z < null.hyp))+(sum((z == null.hyp))+1)/2)/(R+1)
+ b0 <- qnorm(rtp)
+ c0 <- ((2+a0*b0-a0*z0)*z0-b0)/(1+a0*b0-a0*z0)
+ p0 <- pnorm(c0); # P-value for a left-tailed test
+ tc <- c("two.sided","less","greater")
+ pc <- c(2*min(p0,1-p0),p0,1-p0)
+ p <- signif(pc[tc==alternative],digits=3)
+ pv <- c((p>=0.001)&(p<=0.999),(p<0.001),(p>0.999))
+ pt <- c(p,"P < 0.001","P > 0.999")
+ p.value <- pt[pv]
+ ac <- c("not-equal","less-than","greater-than")
+ alt <- ac[tc==alternative]
+}
+# FOR THE CONFIDENCE INTERVAL
+tci <- c("two.sided","greater","less")
+ti <- c("two-sided","lower-bound","upper-bound")
+if (is.null(type)) type <- ti[tci==alternative]
+a <- if (identical(type,"two-sided")) (1-conf.level)/2 else 1-conf.level
+za <- qnorm(a,lower.tail=FALSE)
+a1 <- pnorm(z0+(z0-za)/(1-a0*(z0-za)))
+a2 <- pnorm(z0+(z0+za)/(1-a0*(z0+za)))
+q <- signif(quantile(z,p=c(a1,a2)),digits=4) 
+li <- c(paste("(",q[1],", ",q[2],")",sep=""),paste(q[1],"(LCB)"),paste(q[2],"(UCB)"));
+CI <- li[ti==type];
+lims <- list(q,q[1],q[2]);
+llims <- lims[[c(1:3)[ti==type]]];
+# FOR THE RESULTS
+param <- all.names(substitute(parameter))
+stat.name <- paste("diff.",all.names(substitute(parameter)),sep="")
+if (!test) {alt <- NULL; p.value <- NULL; p <- NULL}
+results <- 
+ list(Stacked=stacked,Boot.values=z,Confidence.limits=llims,Parameter=param,
+      Header=paste("RESULTS OF BCa BOOTSTRAP FOR",toupper(stat.name)),
+      Variable=variable,Pop.1=pop.1,Pop.2=pop.2,n.1=m,
+      n.2=n,Statistic=stat.name,Observed.1=obs.1,Observed.2=obs.2,Observed=obs,
+      Replications=R,Mean=mean(z),SE=sd(z),Bias=bias,Percent.bias=percent.bias,
+      Null=null.hyp,Alternative=alt,P.value=p.value,p.value=p,Level=cl,Type=type,
+      Confidence.interval=CI)
+class(results) <- "boot.two"  # bootstrap, two sample.
+results
+}
+
 ```
+
 
 # Age
 
 Took out the `na` values. Note there are only `na` values for age, and not for any other variable.
-
-
 
 ```{r}
 agedat <- na.omit(newset)
@@ -71,6 +169,7 @@ for (b in 1:B)
   statvals[b,] <- c(mean1, mean2, mean3, mean4,meanall)
 }
 
+
 # Generating data
 set.seed(123) # for reproducibility
 statvals <- data.frame(statvals)
@@ -79,8 +178,8 @@ data <- gather(statvals[,1:4], key = "AgeCat", value = "MeanTotal")
 ggplot(data, aes(x = MeanTotal, fill = AgeCat, after_stat(density))) +
   geom_histogram(position = "identity", alpha = 0.5, bins = 35) +
   geom_density(aes(color = AgeCat), alpha = 0.5) + # Overlay density plot
-  scale_fill_manual(values = c("AgeCat1" = "blue", "AgeCat2" = "magenta", "AgeCat3" = "turquoise", "AgeCat4" = "orange")) +
-  scale_color_manual(values = c("AgeCat1" = "blue2", "AgeCat2" = "magenta2", "AgeCat3" = "turquoise2", "AgeCat4" = "orange2")) + # Match colors for density plots
+  scale_fill_manual(values = c("AgeCat1" = "gold", "AgeCat2" = "sienna1", "AgeCat3" = "brown1", "AgeCat4" = "firebrick")) +
+  scale_color_manual(values = c("AgeCat1" = "gold3", "AgeCat2" = "sienna3", "AgeCat3" = "brown3", "AgeCat4" = "firebrick4")) + # Match colors for density plots
   labs(title = "Histogram of Age Categories with Density Overlay",
        x = "Estimated Mean Total Score",
        y = "Density",
@@ -93,8 +192,8 @@ ggplot(data, aes(x = MeanTotal, fill = AgeCat, after_stat(density))) +
   geom_histogram(position = "identity", alpha = 0.5, bins = 30) +
   geom_density(aes(color = AgeCat), alpha = 0.5) + # Overlay density plot
   facet_wrap(~ AgeCat, nrow = 2, ncol = 2) +
-  scale_fill_manual(values = c("AgeCat1" = "blue", "AgeCat2" = "magenta", "AgeCat3" = "turquoise", "AgeCat4" = "orange")) +
-  scale_color_manual(values = c("AgeCat1" = "blue3", "AgeCat2" = "magenta3", "AgeCat3" = "turquoise3", "AgeCat4" = "orange2")) + # Match colors for density plots
+  scale_fill_manual(values = c("AgeCat1" = "gold", "AgeCat2" = "sienna1", "AgeCat3" = "brown1", "AgeCat4" = "firebrick")) +
+  scale_color_manual(values = c("AgeCat1" = "gold", "AgeCat2" = "sienna1", "AgeCat3" = "brown1", "AgeCat4" = "firebrick")) + # Match colors for density plots
   labs(title = "Histogram of Age Categories with Density Overlay",
        x = "Estimated Mean Total Score",
        y = "Density",
@@ -103,9 +202,143 @@ ggplot(data, aes(x = MeanTotal, fill = AgeCat, after_stat(density))) +
   theme_minimal()
 ```
 
+## Test for differences in total score across age intervals using a k-sample resampling method.
+
+```{r}
+set.seed(12345)
+pt = 0.1
+
+dat1 = less20$Total
+dat2 = int20_35$Total
+dat3 = int35_50$Total
+dat4 = plus50 $Total
+
+N <- length(agedat$Total)
+n1 <- length(less20$Total)
+n2 <- length(int20_35$Total)
+n3 <- length(int35_50$Total)
+n4 <- length(plus50 $Total)
+
+# Function to get the length of the trimmed data
+trimlen <- function(data, p=p.trim) {length(data[data >= quantile(data, p) & data <= quantile(data, 1-p)])}
+
+FBOXtest <- function(dat1, dat2, dat3, dat4, p.trim = pt) 
+{
+  h1 <- trimlen(dat1)
+  h2 <- trimlen(dat2)
+  h3 <- trimlen(dat3)
+  h4 <- trimlen(dat4)
+  h <- c(h1, h2, h3, h4)
+  sumh <- sum(c(h1, h2, h3, h4))
+  
+  fj <- c(h1, h2, h3, h4)/sumh
+  
+  xbar1 <- mean(dat1, trim = p.trim)
+  xbar2 <- mean(dat2, trim = p.trim)
+  xbar3 <- mean(dat3, trim = p.trim)
+  xbar4 <- mean(dat4, trim = p.trim)
+  xbars <- c(xbar1, xbar2, xbar3, xbar4)
+  xbar <- sum(h*xbars)/sumh
+  
+  sj1 <- var(winsorize(dat1, trim = p.trim))
+  sj2 <- var(winsorize(dat2, trim = p.trim))
+  sj3 <- var(winsorize(dat3, trim = p.trim))
+  sj4 <- var(winsorize(dat4, trim = p.trim))
+  sj <- c(sj1, sj2, sj3, sj4)
+  
+  FBOX_num <- sum(h*(xbars-xbar)^2)
+  FBOX_denom <- sum((1-fj)*sj)
+  FBOX <- FBOX_num/FBOX_denom
+  
+  v1 <- ( (sum((1-fj)*sj))^2 ) / ( ((sum(fj*sj))^2) + sum((1-2*fj)*(sj^2)) )
+  v2 <- ( (sum((1-fj)*sj))^2 ) / ( sum(((1-fj)^2)*(sj^2)/(h-1) ) )
+  
+  pval <- 1 - pf(FBOX, v1, v2)
+  return(list(FBOX, v1, v2, p=pval))
+}
+
+og.p <- FBOXtest(dat1, dat2, dat3, dat4)
+og.p$p
+
+## NOW BOOTSTRAP FOR THE K-SAMPLE TEST!!! ###
+
+B <- 1000
+statvals <- numeric(B)
+
+# perform normal bootstrap on them
+for (b in 1:B)
+{
+  new.1 <- agedat$Total[sample(1:N, size = n1, replace = TRUE)]
+  new.2 <- agedat$Total[sample(1:N, size = n2, replace = TRUE)]
+  new.3 <- agedat$Total[sample(1:N, size = n3, replace = TRUE)]
+  new.4 <- agedat$Total[sample(1:N, size = n4, replace = TRUE)]
+  b.result <- FBOXtest(new.1, new.2, new.3, new.4)
+  statvals[b] <- b.result$p
+}
+
+sum(statvals<og.p$p)/B
+
+result <- aov(Total ~ Age, data = agedat)
+
+# Summary of ANOVA results
+summary(result)
+
+```
+
+## It is of interest how well the instrument can be said to apply to youth, not only to adults. You may visually explore this angle using plots.
+
+```{r}
+
+
+ages <- rbind(apply(less20[, 3:8], 2, mean),
+                apply(int20_35[, 3:8], 2, mean),
+                apply(int35_50[, 3:8], 2, mean),
+                apply(plus50[, 3:8], 2, mean))
+ 
+x <- 1:6
+
+cols <- c("gold", "sienna1", "brown3", "firebrick4")
+
+plot(x = x, y = ages[1,], xaxt = 'n',pch = 16, col = "blue", type = "n",
+     ylim = c(-4, 1), ylab = "Mean total subscale score", main = "Comparing subscores over different ages", xlab = "")
+axis(1, at = 1:6, labels = colnames(senses))
+rect(par("usr")[1], -2, par("usr")[2], 2, col = "lightcyan", border = NA,density = 30)
+rect(par("usr")[1], -3, par("usr")[2], -2, col = "antiquewhite", border = NA,density = 30)
+rect(par("usr")[1], -10, par("usr")[2], -3, col = "peachpuff2", border = NA,density = 30)
+for (i in 1:4) {
+  points(x=x, y = ages[i,], pch = 16, col = cols[i])
+  lines(x=x, y = ages[i,], col = cols[i])
+}
+abline(h = 0, col = "grey", lty = 3)
+abline(h = -2, col = "lightgrey", lty = 3)
+abline(h = -3, col = "lightgrey", lty = 3)
+legend("bottomright", legend = c("< 20", "20 - 35", "35 - 50", "50 +"), 
+       col = c("gold", "sienna1", "brown3", "firebrick4"), 
+       cex = 0.7,lty = 1, pch = 16, bg = "white",box.col= "white", y.intersp = 0.8)
+
+cols2 <- viridis(6)
+
+# Now see if I can plot the progression of the subscores over the ages
+par(mfrow = c(2,3))
+for (i in 1:6) {
+  plot(x = 1:4, y = ages[,1], xaxt = 'n',pch = 16, col = "blue", type = "n",
+       ylim = c(-4, 1), ylab = "Mean total subscale score", main = colnames(senses)[i], xlab = "")
+  axis(1, at = 1:4, labels = c("< 20", "20 - 35", "35 - 50", "50 +"))
+  rect(par("usr")[1], -2, par("usr")[2], 2, col = "lightcyan", border = NA,density = 30)
+  rect(par("usr")[1], -3, par("usr")[2], -2, col = "antiquewhite", border = NA,density = 30)
+  rect(par("usr")[1], -10, par("usr")[2], -3, col = "peachpuff2", border = NA,density = 30)
+  abline(h = 0, col = "grey", lty = 3)
+  abline(h = -2, col = "lightgrey", lty = 3)
+  abline(h = -3, col = "lightgrey", lty = 3)
+  points(x=1:4, y = ages[,i], pch = 16, col = cols2[i])
+  lines(x=1:4, y = ages[,i], col = cols2[i])
+}
+
+par(mfrow=c(1,1))
+```
+
 
 # Gender
-
 
 ```{r}
 set.seed(12345)
@@ -160,6 +393,17 @@ confpoints <- quantile(x = thetastar, probs = tt, type = 1)
 confpoints
 ```
 
+### Doing a two-sided BCa confidence interval:
+
+```{r}
+set.seed(12345)
+gender.bca = boot.two.bca(x = FemSmell$Smell, stacked = FALSE,y = MaleSmell$Smell,parameter = mean, null.hyp = 0, conf.level = 0.9, R = 1000)
+gender.bca$Confidence.limits
+gender.bca$Alternative
+gender.bca$p.value
+```
+
+
 Now visualise the data
 
 ```{r}
@@ -170,7 +414,7 @@ ggplot(data, aes(x = MeanSmell, fill = Gender, after_stat(density))) +
   geom_density(aes(color = Gender), alpha = 0.5) + # Overlay density plot
   scale_fill_manual(values = c("Female" = "magenta","Male" = "cornflowerblue")) +
   scale_color_manual(values = c("Female" = "magenta3", "Male" = "blue")) + # Match colors for density plots
-  labs(title = "Histogram of Smell by Gender with Density Overlay",
+  labs(title = "Histogram of Bootstrap Smell Scores by Gender with Density Overlay",
        x = "Estimated Mean Smell",
        y = "Density",
        fill = "Category",
@@ -178,21 +422,27 @@ ggplot(data, aes(x = MeanSmell, fill = Gender, after_stat(density))) +
   theme_minimal()
 
 # Plot histogram with confidence interval lines and annotations
-confidence_interval <- confpoints
+# confidence_interval <- confpoints
+confidence_interval <- gender.bca$Confidence.limits
+thetastar <- gender.bca$Boot.values
 
 ggplot(data.frame(x = thetastar), aes(x = x)) +
-  geom_histogram(binwidth = 0.05, fill = "skyblue", color = "black", alpha = 0.8) +
+  geom_histogram(binwidth = 0.04, fill = "skyblue", color = "black", alpha = 0.8) +
   geom_vline(xintercept = confidence_interval, linetype = "dashed", color = "maroon", size = 1) +
-  geom_text(aes(x = confidence_interval[1] + 0.4, y = 100, label = paste("Lower:", round(confidence_interval[1], 2))),
+  geom_text(aes(x = confidence_interval[1] - 0.15, y = 150, label = paste("Lower:", round(confidence_interval[1], 2))),
             color = "maroon", vjust = 0, hjust = 0) +
-  geom_text(aes(x = confidence_interval[2] - 0.4, y = 100, label = paste("Upper:", round(confidence_interval[2], 2))),
+  geom_text(aes(x = confidence_interval[2] + 0.15, y = 150, label = paste("Upper:", round(confidence_interval[2], 2))),
             color = "maroon", vjust = 0, hjust = 1) +
-  labs(title = expression("Histogram of Difference in Means with BC"[a] ~ "Confidence Interval"), x = "Value", y = "Frequency") +
+  labs(title = expression("Histogram of Difference in Mean Smell with BC"[a] ~ "Confidence Interval"), x = "Value", y = "Frequency") +
   theme_minimal() # You can change the theme if needed
 
 ```
 
 Now we want to investigate the distributions of the two groups, as well as the impact of the two sample size...
+
+**Not sure if I was allowed to do this, but taking the absolute value of the different means gives a much more significant value! Because the differences cancelled each other out!**
+
+Using a pooled variance:
 
 ```{r}
 set.seed(12345)
@@ -203,7 +453,7 @@ B <- 1000
 
 s.pooled <- sqrt(((nF-1)*var(FemSmell$Smell) + (nM-1)*var(MaleSmell$Smell))/(nsize-2))
 denom <- s.pooled*sqrt((1/nF) + (1/nM))
-t.obs <- (mean(FemSmell$Smell)-mean(MaleSmell$Smell))/denom
+t.obs <- -(mean(FemSmell$Smell)-mean(MaleSmell$Smell))/denom
 
 t.star.st <- numeric(B)
 
@@ -216,7 +466,7 @@ for (b in 1:B)
   new.m <- newSample[(nF+1):nsize,]
   s.pooled <- sqrt(((nF-1)*var(new.f$Smell) + (nM-1)*var(new.m$Smell))/(nsize-2))
   denom <- s.pooled*sqrt((1/nF) + (1/nM))
-  t.star.st[b] <- (mean(new.f$Smell)- mean(new.m$Smell))/denom
+  t.star.st[b] <- (mean(new.m$Smell)- mean(new.f$Smell))/denom
 }
 
 ASL.student <- sum(t.star.st >= t.obs)/B
@@ -245,7 +495,7 @@ B <- 1000
 # Algorithm 16.2
 x.bar <- mean(smellset$Smell)
 denom <- sqrt((var(FemSmell$Smell)/nF) + (var(MaleSmell$Smell)/nM))
-t.obs <- (mean(FemSmell$Smell)-mean(MaleSmell$Smell))/denom
+t.obs <- (mean(MaleSmell$Smell)-mean(FemSmell$Smell))/denom
 f.trans <- FemSmell$Smell - mean(FemSmell$Smell) + x.bar
 m.trans <- MaleSmell$Smell - mean(MaleSmell$Smell) + x.bar
 
@@ -256,7 +506,7 @@ for (b in 1:B)
   new.f <- f.trans[sample(1:nF, size = bsize, replace = TRUE)]
   new.m <- m.trans[sample(1:nM, size = bsize, replace = TRUE)]
   denom <- sqrt((var(new.f)/nF) + (var(new.m)/nM))
-  t.star.H02[b] <- (mean(new.f)-mean(new.m))/denom
+  t.star.H02[b] <- (mean(new.m)-mean(new.f))/denom
 }
 
 ASL.H02 <- sum(t.star.H02 >= t.obs)/B
@@ -267,7 +517,7 @@ resultsAll02
 
 hist(t.star.H02, xlim = c(-3, 3))
 abline(v = t.obs, col = "maroon", lty = 2)
-text(x=t.obs+0.5, y = 175, labels="t.obs", col = "maroon", cex = 0.8)
+text(x=t.obs-0.5, y = 175, labels="t.obs", col = "maroon", cex = 0.8)
 ```
 
 
@@ -292,7 +542,7 @@ B <- 1000
 # Algorithm 16.2
 x.bar <- mean(smellsetYouth$Smell)
 denom <- sqrt((var(FemSmellYouth$Smell)/nF) + (var(MaleSmellYouth$Smell)/nM))
-t.obs <- (mean(FemSmellYouth$Smell)-mean(MaleSmellYouth$Smell))/denom
+t.obs <- (mean(MaleSmellYouth$Smell)-mean(FemSmellYouth$Smell))/denom
 f.trans <- FemSmellYouth$Smell - mean(FemSmellYouth$Smell) + x.bar
 m.trans <- MaleSmellYouth$Smell - mean(MaleSmellYouth$Smell) + x.bar
 
@@ -303,7 +553,7 @@ for (b in 1:B)
   new.f <- f.trans[sample(1:nF, size = bsize, replace = TRUE)]
   new.m <- m.trans[sample(1:nM, size = bsize, replace = TRUE)]
   denom <- sqrt((var(new.f)/nF) + (var(new.m)/nM))
-  t.star.H02[b] <- (mean(new.f)-mean(new.m))/denom
+  t.star.H02[b] <- (mean(new.m)-mean(new.f))/denom
 }
 
 ASL.H02 <- sum(t.star.H02 >= t.obs)/B
@@ -337,7 +587,7 @@ B <- 1000
 # Algorithm 16.2
 x.bar <- mean(smellsetMed$Smell)
 denom <- sqrt((var(FemSmellMed$Smell)/nF) + (var(MaleSmellMed$Smell)/nM))
-t.obs <- (mean(FemSmellMed$Smell)-mean(MaleSmellMed$Smell))/denom
+t.obs <- -(mean(FemSmellMed$Smell)-mean(MaleSmellMed$Smell))/denom
 f.trans <- FemSmellMed$Smell - mean(FemSmellMed$Smell) + x.bar
 m.trans <- MaleSmellMed$Smell - mean(MaleSmellMed$Smell) + x.bar
 
@@ -348,7 +598,7 @@ for (b in 1:B)
   new.f <- f.trans[sample(1:nF, size = bsize, replace = TRUE)]
   new.m <- m.trans[sample(1:nM, size = bsize, replace = TRUE)]
   denom <- sqrt((var(new.f)/nF) + (var(new.m)/nM))
-  t.star.H02[b] <- (mean(new.f)-mean(new.m))/denom
+  t.star.H02[b] <- -(mean(new.f)-mean(new.m))/denom
 }
 
 ASL.H02 <- sum(t.star.H02 >= t.obs)/B
@@ -383,7 +633,7 @@ B <- 1000
 # Algorithm 16.2
 x.bar <- mean(smellsetMed2$Smell)
 denom <- sqrt((var(FemSmellMed2$Smell)/nF) + (var(MaleSmellMed2$Smell)/nM))
-t.obs <- (mean(FemSmellMed2$Smell)-mean(MaleSmellMed2$Smell))/denom
+t.obs <- -(mean(FemSmellMed2$Smell)-mean(MaleSmellMed2$Smell))/denom
 f.trans <- FemSmellMed2$Smell - mean(FemSmellMed2$Smell) + x.bar
 m.trans <- MaleSmellMed2$Smell - mean(MaleSmellMed2$Smell) + x.bar
 
@@ -394,7 +644,7 @@ for (b in 1:B)
   new.f <- f.trans[sample(1:nF, size = bsize, replace = TRUE)]
   new.m <- m.trans[sample(1:nM, size = bsize, replace = TRUE)]
   denom <- sqrt((var(new.f)/nF) + (var(new.m)/nM))
-  t.star.H02[b] <- (mean(new.f)-mean(new.m))/denom
+  t.star.H02[b] <- -(mean(new.f)-mean(new.m))/denom
 }
 
 ASL.H02 <- sum(t.star.H02 >= t.obs)/B
@@ -408,11 +658,70 @@ abline(v = t.obs, col = "maroon", lty = 2)
 text(x=t.obs+0.18, y = 315, labels="t.obs", col = "maroon", cex = 0.8)
 ```
 
+### Test for gender difference among ages 50+
+
+Now investigate the differences when looking at specific age categories. Use Algorithm 16.2 with unequal variances to test for **ages between 20 and 35**. From this result we can see that the difference at medium ages are not too different. But note here that the sample size now differ more than at the younger ages.
+
+```{r}
+set.seed(12345)
+
+FemSmellMed3 <- na.omit(newset[newset$Gender=="Female" & newset$Age=="50+",])
+MaleSmellMed3 <- na.omit(newset[newset$Gender=="Male" & newset$Age=="50+",])
+smellsetMed3 <- rbind(FemSmellMed3, MaleSmellMed3)
+
+nF <- nrow(FemSmellMed3)
+nM <- nrow(MaleSmellMed3)
+
+nsize <- nrow(smellsetMed3)
+bsize <- nsize
+B <- 1000
+
+# Algorithm 16.2
+x.bar <- mean(smellsetMed3$Smell)
+denom <- sqrt((var(FemSmellMed3$Smell)/nF) + (var(MaleSmellMed3$Smell)/nM))
+t.obs <- -(mean(FemSmellMed3$Smell)-mean(MaleSmellMed3$Smell))/denom
+f.trans <- FemSmellMed3$Smell - mean(FemSmellMed3$Smell) + x.bar
+m.trans <- MaleSmellMed3$Smell - mean(MaleSmellMed3$Smell) + x.bar
+
+t.star.H02 <- numeric(B)
+
+for (b in 1:B)
+{
+  new.f <- f.trans[sample(1:nF, size = bsize, replace = TRUE)]
+  new.m <- m.trans[sample(1:nM, size = bsize, replace = TRUE)]
+  denom <- sqrt((var(new.f)/nF) + (var(new.m)/nM))
+  t.star.H02[b] <- -(mean(new.f)-mean(new.m))/denom
+}
+
+ASL.H02 <- sum(t.star.H02 >= t.obs)/B
+
+resultsMed3 <- data.frame(Result = c("nF", "nM", "FemaleVariance", "MaleVariance", "t.obs", "ASL.H02"),
+                         Value = c(nF, nM, var(FemSmellMed3$Smell), var(MaleSmellMed3$Smell), t.obs, ASL.H02))
+resultsMed3
+
+hist(t.star.H02, ylim = c(0, 330))
+abline(v = t.obs, col = "maroon", lty = 2)
+text(x=t.obs+0.18, y = 315, labels="t.obs", col = "maroon", cex = 0.8)
+```
+
+
+Now looking at how the variances differ:
+
+```{r}
+Femvar <- c(var(FemSmell$Smell),var(FemSmellYouth$Smell), var(FemSmellMed$Smell), var(FemSmellMed2$Smell))
+Malevar <- c(var(MaleSmell$Smell), var(MaleSmellYouth$Smell), var(MaleSmellMed$Smell), var(MaleSmellMed2$Smell))
+
+GenderVar <- data.frame(cbind(Femvar, Malevar))
+row.names(GenderVar) <- c("SmellTotal", "Youth", "20-35", "35-50")
+GenderVar
+```
+
 # Culture
 
 Just start by plotting the histograms and densities.
 
 ```{r}
+set.seed(12345)
 
 # calculate the number of countries in every region
 regions <- unique(newset$Region)
@@ -515,6 +824,13 @@ ggplot(data, aes(x = MeanTotal, fill = Region, after_stat(density))) +
 You can see here that North America has lots of variation between the different senses and shows that outof all the regions, the individuals don't develop their sensory sensitivity evenly.
 
 ```{r}
+set.seed(12345)
+nsize <- nrow(newset)
+bsize <- nsize
+B <- 1000
+
+ogsamp <- newset
+
 # Test over all ages
 statvals <- matrix(0, nrow=B, ncol = 5)
 colnames(statvals) <- c("sa", "namerica", "uk", "aus", "africa")
@@ -557,6 +873,7 @@ ggplot(data, aes(x = MeanVar, fill = Region, after_stat(density))) +
 Now we test for youth.
 
 ```{r}
+set.seed(12345)
 youth <- agedat[agedat$Age=="<20",]
 
 nsize <- nrow(youth)
@@ -602,7 +919,6 @@ ggplot(data, aes(x = MeanVar, fill = Region, after_stat(density))) +
 
 ```
 
-Maybe do this using bootstrap as well?...
 
 ```{r}
 
@@ -643,7 +959,241 @@ legend("bottomright", legend = c("sa", "namerica", "uk", "aus", "other","africa"
 
 ```
 
+To reduce sensitivity to individuals with possibly extreme situations, use a robust statistic and calculate confidence intervals for the “typical” total score in each of the regions and show the intervals in one plot.
 
+```{r}
+set.seed(12345)
+sa <- newset[newset$Region=="southAfrica",]
+na <- newset[newset$Region=="northAmerica",]
+uk <- newset[newset$Region=="UKireland",]
+aus <- newset[newset$Region=="AustrNZ",]
+other <- newset[newset$Region=="Other",]
+afr <- newset[newset$Region=="Africa",]
 
-var(apply(newset[,3:8],2,mean))
+B <- 2000
+
+theta.med <- function(x, i) {mean(x[i], trim = 0.1)}
+
+saboot <- boot(sa$Total, theta.med, B)
+naboot <- boot(na$Total, theta.med, B)
+ukboot <- boot(uk$Total, theta.med, B)
+ausboot <- boot(aus$Total, theta.med, B)
+othboot <- boot(other$Total, theta.med, B)
+afriboot <- boot(afr$Total, theta.med, B)
+
+saci <- boot.ci(saboot, conf = 0.9, type = c("perc", "bca"))$bca[c(4,5)]
+naci <- boot.ci(naboot, conf = 0.9, type = c("perc", "bca"))$bca[c(4,5)]
+ukci <- boot.ci(ukboot, conf = 0.9, type = c("perc", "bca"))$bca[c(4,5)]
+ausci <- boot.ci(ausboot, conf = 0.9, type = c("perc", "bca"))$bca[c(4,5)]
+#othci <- boot.ci(othboot, conf = 0.9, type = c("perc", "bca"))$bca[c(4,5)]
+africi <- boot.ci(afriboot, conf = 0.9, type = c("perc", "bca"))$bca[c(4,5)]
+
+sat <- boot.ci(saboot, conf = 0.9, type = c("perc", "bca"))$t0
+nat <- boot.ci(naboot, conf = 0.9, type = c("perc", "bca"))$t0
+ukt <- boot.ci(ukboot, conf = 0.9, type = c("perc", "bca"))$t0
+aust <- boot.ci(ausboot, conf = 0.9, type = c("perc", "bca"))$t0
+afrit <- boot.ci(afriboot, conf = 0.9, type = c("perc", "bca"))$t0
+
+xlow <- min(saci,naci,ukci,ausci,africi)
+xup <- max(saci,naci,ukci,ausci,africi)
+
+# Sample data
+means <- c(sat, nat, ukt, aust, afrit)
+ci_low <- rbind(saci,naci,ukci,ausci,africi)[,1]
+ci_up <- rbind(saci,naci,ukci,ausci,africi)[,2]
+
+# Plot means with error bars
+plot(means, type = "b", ylim = c(xlow, xup), xlab = "Regions", ylab = "Confidence Intervals", 
+     xaxt = "n", main = expression("BC"[a]~"CI's of Bootstrap Trimmed Means"))
+points(means, pch = 16, col = c("blue", "magenta", "turquoise", "orange", "green"))
+arrows(x0 = 1:5, y0 = ci_low, y1 = ci_up, angle = 90, code = 3, length = 0.1,
+       col = c("blue", "magenta", "turquoise", "orange", "green"))
+axis(1, at = 1:5, labels = c("sa", "northamerica", "uk", "aus", "africa"))
+
+```
+
 # Covid-19
+
+## Visually compare the distributions of the total scores across the stages
+
+```{r}
+nsize <- nrow(longset)
+bsize <- nsize
+B <- 500
+
+ogsamp <- longset # specify your sample (cont or discrete)
+
+statvals <- matrix(0, nrow=B, ncol = 5)
+colnames(statvals) <- c("preCovid","Lockdown", "Waves",  "postCovid2", "postCovid3")
+
+# perform normal bootstrap on them
+for (b in 1:B)
+{
+  newSelect <- sample(1:nsize, size = bsize, replace = TRUE)
+  newSample <- ogsamp[newSelect,]
+  mean1 <- mean(newSample[newSample$Covid=="preCovid","Total"])
+  mean2 <- mean(newSample[newSample$Covid=="Lockdown","Total"])
+  mean3 <- mean(newSample[newSample$Covid=="Waves","Total"])
+  mean4 <- mean(newSample[newSample$Covid=="postCovid V2","Total"])
+  mean5 <- mean(newSample[newSample$Covid=="postCovid V3","Total"])
+  
+  statvals[b,] <- c(mean1, mean2, mean3, mean4,mean5)
+}
+
+# Generating data
+set.seed(123) # for reproducibility
+statvals <- data.frame(statvals)
+data <- gather(statvals, key = "CovidStage", value = "MeanTotal")
+
+ggplot(data, aes(x = MeanTotal, fill = CovidStage, after_stat(density))) +
+  geom_histogram(position = "identity", alpha = 0.5, bins = 35) +
+  geom_density(aes(color = CovidStage), alpha = 0.5) + # Overlay density plot
+  scale_fill_manual(values = c("preCovid" = "olivedrab2","Lockdown" = "skyblue", "Waves" = "orchid", "postCovid2" = "salmon1", "postCovid3" = "goldenrod1")) +
+  scale_color_manual(values = c("preCovid" = "olivedrab3","Lockdown" = "skyblue3", "Waves" = "orchid3", "postCovid2" = "salmon2","postCovid3" = "goldenrod2")) + # Match colors for density plots
+  labs(title = "Histogram of Bootstrap Means in Covid Stage with Density Overlay",
+       x = "Estimated Bootstrap Mean Total Score",
+       y = "Density",
+       fill = "Category",
+       color = "Category") +
+  theme_minimal()
+
+# Plotting histograms with ggplot on a 2x2 grid
+ggplot(data, aes(x = MeanTotal, fill = CovidStage, after_stat(density))) +
+  geom_histogram(position = "identity", alpha = 0.5, bins = 30) +
+  geom_density(aes(color = CovidStage), alpha = 0.5) + # Overlay density plot
+  facet_wrap(~ CovidStage, nrow = 2, ncol = 3) +
+  scale_fill_manual(values = c("preCovid" = "olivedrab2","Lockdown" = "skyblue", "Waves" = "orchid",  "postCovid2" = "salmon1", "postCovid3" = "goldenrod1")) +
+  scale_color_manual(values = c("preCovid" = "olivedrab3","Lockdown" = "skyblue3", "Waves" = "orchid3",  "postCovid2" = "salmon2","postCovid3" = "goldenrod2")) + # Match colors for density plots
+  labs(title = "Histograms of Bootstrap Means for Covid Stages with Density Overlay",
+       x = "Estimated Mean Total Score",
+       y = "Density",
+       fill = "Category",
+       color = "Category") +
+  theme_minimal()
+```
+
+## Use the Covid variable in its numerical form (factor level numbers) to test whether the total score is independent of the Covid stage (independence test using Spearman rank correlation) (what assumption are you making?)
+
+```{r}
+set.seed(12345)
+
+longset$Cov <- 2
+longset$Cov[longset$Covid=="Lockdown"] <- 3
+longset$Cov[longset$Covid=="Waves"] <- 5
+longset$Cov[longset$Covid=="postCovid V2"] <- 4
+longset$Cov[longset$Covid=="postCovid V3"] <- 6
+
+B <- 1000
+theta.corr <- function(x, i) {cor(x[i,8:9], method = 'spearman')[1,2]}
+cor.boot <- boot(longset, theta.corr, B)
+t <- cor.boot$t
+cor.ci <- boot.ci(cor.boot,conf = 0.9, type = "perc")$percent[4:5]
+
+
+# Plot histogram with confidence interval lines and annotations
+confidence_interval <- cor.ci
+
+ggplot(data.frame(x = t), aes(x = x)) +
+  geom_histogram(binwidth = 0.005, fill = "skyblue", color = "skyblue4", alpha = 0.8) +
+  geom_vline(xintercept = confidence_interval, linetype = "dashed", color = "maroon", size = 1) +
+  geom_text(aes(x = confidence_interval[1] + 0.001, y = 200, label = paste("Lower:", round(confidence_interval[1], 3))),
+            color = "maroon", vjust = 0, hjust = 0) +
+  geom_text(aes(x = confidence_interval[2] - 0.001, y = 200, label = paste("Upper:", round(confidence_interval[2], 3))),
+            color = "maroon", vjust = 0, hjust = 1) +
+  labs(title = "Histogram of Spearman Corr with Percentile Confidence Interval", x = "Bootstrap Correlation Coeficient", y = "Frequency") +
+  theme_minimal() # You can change the theme if needed
+
+```
+
+
+## Estimate the **percentage** of low threshold styles (total score below -7) (what does this indicate?) in each stage, using a simple bootstrap in each stage
+
+```{r}
+set.seed(12345)
+
+B <- 1000
+theta.perc<- function(x, i) {sum(x[i]<(-7))/length(x)}
+
+pre.boot <- boot(longset$Total[longset$Covid=="preCovid"], theta.perc, B)
+pre.ci0 <- boot.ci(pre.boot,conf = 0.9, type = "perc")
+pre.ci <- pre.ci0$percent[4:5]
+pre.t <- pre.ci0$t0
+
+lock.boot <- boot(longset$Total[longset$Covid=="Lockdown"], theta.perc, B)
+lock.ci0 <- boot.ci(lock.boot,conf = 0.9, type = "perc")
+lock.ci <- lock.ci0$percent[4:5]
+lock.t <- lock.ci0$t0
+
+wave.boot <- boot(longset$Total[longset$Covid=="Waves"], theta.perc, B)
+wave.ci0 <- boot.ci(wave.boot,conf = 0.9, type = "perc")
+wave.ci <- wave.ci0$percent[4:5]
+wave.t <- wave.ci0$t0
+
+post2.boot <- boot(longset$Total[longset$Covid=="postCovid V2"], theta.perc, B)
+post2.ci0 <- boot.ci(post2.boot,conf = 0.9, type = "perc")
+post2.ci <- post2.ci0$percent[4:5]
+post2.t <- post2.ci0$t0
+
+post3.boot <- boot(longset$Total[longset$Covid=="postCovid V3"], theta.perc, B)
+post3.ci0 <- boot.ci(post3.boot,conf = 0.9, type = "perc")
+post3.ci <- post3.ci0$percent[4:5]
+post3.t <- post3.ci0$t0
+
+
+xlow <- min(pre.ci,lock.ci,wave.ci,post2.ci,post3.ci)
+xup <- max(pre.ci,lock.ci,wave.ci,post2.ci,post3.ci)
+
+# Sample data
+means <- c(pre.t,lock.t,wave.t,post2.t,post3.t)
+ci_low <- rbind(pre.ci,lock.ci,wave.ci,post2.ci,post3.ci)[,1]
+ci_up <- rbind(pre.ci,lock.ci,wave.ci,post2.ci,post3.ci)[,2]
+
+
+# Plot means with error bars
+plot(means, type = "b", ylim = c(xlow, xup), xlab = "Covid Stages", ylab = "Confidence Intervals", 
+     xaxt = "n", main = "Confidence intervals of Bootstrap Proportion of Low Threshold")
+points(means, pch = 16, col = c("skyblue","orchid","olivedrab2","salmon1","goldenrod1"))
+arrows(x0 = 1:5, y0 = ci_low, y1 = ci_up, angle = 90, code = 3, length = 0.1,
+       col = c(c("skyblue","orchid","olivedrab2","salmon1","goldenrod1")))
+axis(1, at = 1:5, labels = c("preCovid", "Lockdown", "Waves", "postCovid2", "postCovid3"))
+
+```
+
+### Explore patterns in the subscales informally, using graphs or other exploratory techniques
+
+```{r}
+pre <- longset[longset$Covid=="preCovid",]
+lock <- longset[longset$Covid=="Lockdown",]
+wave <- longset[longset$Covid=="Waves",]
+post2 <- longset[longset$Covid=="postCovid V2",]
+post3 <- longset[longset$Covid=="postCovid V3",]
+
+stages <- rbind(apply(pre[, 1:6], 2, mean),
+                apply(lock[, 1:6], 2, mean),
+                apply(wave[, 1:6], 2, mean),
+                apply(post2[, 1:6], 2, mean),
+                apply(post3[, 1:6], 2, mean))
+ 
+x <- 1:6
+
+cols <- c("skyblue","orchid","olivedrab2","salmon1","goldenrod1")
+
+plot(x = x, y = senses[1,], xaxt = 'n',pch = 16, col = "blue", type = "n",
+     ylim = c(-4, 1), ylab = "Mean total subscale score", main = "Comparing subscores over different Covid stages")
+axis(1, at = 1:6, labels = colnames(senses))
+rect(par("usr")[1], -2, par("usr")[2], 2, col = "lightcyan", border = NA,density = 30)
+rect(par("usr")[1], -3, par("usr")[2], -2, col = "antiquewhite", border = NA,density = 30)
+rect(par("usr")[1], -10, par("usr")[2], -3, col = "peachpuff2", border = NA,density = 30)
+for (i in 1:6) {
+  points(x=x, y = senses[i,], pch = 16, col = cols[i])
+  lines(x=x, y = senses[i,], col = cols[i])
+}
+abline(h = 0, col = "grey", lty = 3)
+abline(h = -2, col = "lightgrey", lty = 3)
+abline(h = -3, col = "lightgrey", lty = 3)
+legend("bottomright", legend = c("preCovid", "Lockdown", "Waves", "postCovid2", "postCovid3"), 
+       col = c("skyblue","orchid","olivedrab2","salmon1","goldenrod1"), 
+       cex = 0.7,lty = 1, pch = 16, bg = "white",box.col= "white", y.intersp = 0.8)
+
+```
+
